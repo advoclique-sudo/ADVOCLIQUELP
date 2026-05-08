@@ -1856,18 +1856,20 @@ window.AdvocliqueAudio = (function(){
     burst(base + 0.07, 0.006, 2400, 1.2, 0.42);
     burst(base + 0.07, 0.004, 3800, 1.0, 0.28);
   }
-  function click(){
+  function click(){ return clickAt(0); }
+  // clickAt(delay) — schedule the click sound `delay` seconds from now.
+  // Critical for cinematic moments: the call must happen inside the user
+  // gesture to satisfy iOS, but the sound can be heard later. Web Audio
+  // honors absolute scheduling regardless of when the gesture ended.
+  function clickAt(delay){
     const c = ctx();
     if (!c) return;
-    // Always force unlock + resume; safe to call repeatedly.
     unlockOnce(c);
     if (c.state === 'suspended'){
       try { c.resume().catch(function(){}); } catch(_){}
     }
-    // 50ms lookahead so bursts are guaranteed in the future even if resume()
-    // is mid-flight (currentTime briefly frozen → past schedules get dropped).
-    // Inaudible to humans, bulletproof against the desktop/iOS race window.
-    const base = c.currentTime + 0.05;
+    const lookahead = 0.05;
+    const base = c.currentTime + lookahead + Math.max(0, delay || 0);
     _scheduleBursts(c, base);
   }
   // Debug helper — open DevTools and call AdvocliqueAudio.debug() to inspect state.
@@ -1881,7 +1883,7 @@ window.AdvocliqueAudio = (function(){
       unlocked: _unlocked
     };
   }
-  return { click: click, resume: resume, debug: debug };
+  return { click: click, clickAt: clickAt, resume: resume, debug: debug };
 })();
 
 // ────────── HERO CINEMATIC GATE ──────────
@@ -1956,10 +1958,14 @@ window.AdvocliqueAudio = (function(){
     fired = true;
     blockingScroll = true;
 
-    // iOS: trigger the silent unlock RIGHT NOW (still inside the user gesture).
-    // The actual click sound fires 250ms later from a setTimeout — out of the
-    // gesture window — so without this call the context could remain locked.
-    if (window.AdvocliqueAudio) window.AdvocliqueAudio.resume();
+    // CRITICAL — schedule the click sound NOW (inside the gesture) but with
+    // a 250ms delay in Web Audio time. This is the only way iOS Safari
+    // reliably plays the cinematic sound: setTimeout-deferred click() calls
+    // happen outside the gesture window and are silently dropped.
+    if (window.AdvocliqueAudio){
+      window.AdvocliqueAudio.resume();
+      window.AdvocliqueAudio.clickAt(0.25);
+    }
 
     // Compute target: visual center of the H1 block
     const cRect = cursor.getBoundingClientRect();
@@ -1973,7 +1979,8 @@ window.AdvocliqueAudio = (function(){
     cursor.classList.add('flying');
     cursor.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(1.55)';
 
-    // T = 250..400ms — click: cursor settles, ring expands, flash blooms, sound fires
+    // T = 250..400ms — click: cursor settles, ring expands, flash blooms.
+    // (Sound was already pre-scheduled above to fire at this exact moment.)
     setTimeout(function(){
       cursor.classList.add('click');
       cursor.style.transform = 'translate(' + tx + 'px,' + ty + 'px) scale(1.05)';
@@ -1982,7 +1989,6 @@ window.AdvocliqueAudio = (function(){
         flash.style.top  = (hRect.top  + hRect.height/2) + 'px';
         flash.classList.add('fire');
       }
-      playClick();
     }, 250);
 
     // T = 400ms — text exits with stagger; cursor begins descent + fade
