@@ -1820,18 +1820,12 @@ window.AdvocliqueAudio = (function(){
   ['pointerdown','keydown','wheel','touchstart','click'].forEach(function(ev){
     window.addEventListener(ev, resume, { passive:true, capture:true });
   });
-  function click(){
-    const c = ctx();
-    if (!c) return;
-    if (c.state === 'suspended'){
-      try { c.resume().catch(function(){}); } catch(_){}
-    }
-    const t = c.currentTime;
+  function _scheduleBursts(c, base){
     const master = c.createGain();
-    master.gain.setValueAtTime(0.5, t);
+    master.gain.setValueAtTime(0.5, base);
     const hp = c.createBiquadFilter();
     hp.type = 'highpass';
-    hp.frequency.setValueAtTime(700, t);
+    hp.frequency.setValueAtTime(700, base);
     master.connect(hp).connect(c.destination);
     function burst(when, dur, freq, q, level){
       try {
@@ -1855,14 +1849,39 @@ window.AdvocliqueAudio = (function(){
       } catch (e) { /* ignore */ }
     }
     // PRESS — main click
-    burst(t,        0.010, 2200, 1.4, 0.95);
-    burst(t,        0.005, 4800, 1.0, 0.70);
-    burst(t,        0.014,  900, 0.7, 0.40);
+    burst(base,        0.010, 2200, 1.4, 0.95);
+    burst(base,        0.005, 4800, 1.0, 0.70);
+    burst(base,        0.014,  900, 0.7, 0.40);
     // RELEASE — softer micro-click
-    burst(t + 0.07, 0.006, 2400, 1.2, 0.42);
-    burst(t + 0.07, 0.004, 3800, 1.0, 0.28);
+    burst(base + 0.07, 0.006, 2400, 1.2, 0.42);
+    burst(base + 0.07, 0.004, 3800, 1.0, 0.28);
   }
-  return { click: click, resume: resume };
+  function click(){
+    const c = ctx();
+    if (!c) return;
+    // Always force unlock + resume; safe to call repeatedly.
+    unlockOnce(c);
+    if (c.state === 'suspended'){
+      try { c.resume().catch(function(){}); } catch(_){}
+    }
+    // 50ms lookahead so bursts are guaranteed in the future even if resume()
+    // is mid-flight (currentTime briefly frozen → past schedules get dropped).
+    // Inaudible to humans, bulletproof against the desktop/iOS race window.
+    const base = c.currentTime + 0.05;
+    _scheduleBursts(c, base);
+  }
+  // Debug helper — open DevTools and call AdvocliqueAudio.debug() to inspect state.
+  function debug(){
+    const c = _ctx;
+    return {
+      created: !!c,
+      state: c ? c.state : null,
+      currentTime: c ? c.currentTime : null,
+      sampleRate: c ? c.sampleRate : null,
+      unlocked: _unlocked
+    };
+  }
+  return { click: click, resume: resume, debug: debug };
 })();
 
 // ────────── HERO CINEMATIC GATE ──────────
