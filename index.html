@@ -164,7 +164,16 @@
 }
 
 *,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
-html{scroll-behavior:smooth;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+html{
+  scroll-behavior:smooth;
+  -webkit-font-smoothing:antialiased;
+  -moz-osx-font-smoothing:grayscale;
+  /* Bloqueia rubber-band horizontal no iOS sem quebrar position:sticky */
+  overflow-x:hidden;
+  overflow-x:clip;
+  width:100%;
+  max-width:100vw;
+}
 body{
   font-family:'Outfit',sans-serif;
   background:var(--cream);
@@ -172,6 +181,12 @@ body{
   font-weight:400;
   line-height:1.5;
   overflow-x:hidden;
+  overflow-x:clip;
+  width:100%;
+  max-width:100vw;
+  /* Permite scroll vertical e zoom-pinch, mas impede pan horizontal acidental */
+  touch-action:pan-y pinch-zoom;
+  -webkit-overflow-scrolling:touch;
 }
 img{max-width:100%;display:block}
 a{color:inherit;text-decoration:none}
@@ -1678,7 +1693,6 @@ section.block{padding:120px 32px;position:relative}
       <h5>Contato</h5>
       <ul>
         <li><a href="https://wa.me/5553991962382" target="_blank" rel="noopener">(53) 99196-2382</a></li>
-        <li><a href="mailto:contato@advoclique.com.br">contato@advoclique.com.br</a></li>
       </ul>
     </div>
   </div>
@@ -1764,6 +1778,7 @@ function submitForm(e){
 // dispatch through window.AdvocliqueAudio.click().
 window.AdvocliqueAudio = (function(){
   let _ctx = null;
+  let _unlocked = false;   // iOS hard unlock flag
   function ctx(){
     if (_ctx) return _ctx;
     try {
@@ -1773,11 +1788,32 @@ window.AdvocliqueAudio = (function(){
     } catch(e){ return null; }
     return _ctx;
   }
+  // iOS Safari requires a real buffer scheduled inside the user gesture before
+  // it considers the AudioContext truly unlocked. resume() alone is NOT enough —
+  // it can resolve while the context stays "running" but mute. Playing one
+  // 1-sample silent buffer flips the internal "user-activated" bit forever.
+  function unlockOnce(c){
+    if (_unlocked || !c) return;
+    try {
+      const buf = c.createBuffer(1, 1, 22050);
+      const src = c.createBufferSource();
+      src.buffer = buf;
+      src.connect(c.destination);
+      // start at currentTime — must be inside the user gesture to satisfy iOS
+      if (typeof src.start === 'function') src.start(0);
+      else if (typeof src.noteOn === 'function') src.noteOn(0);
+      _unlocked = true;
+    } catch(_){}
+  }
   function resume(){
     const c = ctx();
-    if (c && c.state === 'suspended'){
+    if (!c) return;
+    if (c.state === 'suspended'){
       try { c.resume().catch(function(){}); } catch(_){}
     }
+    // Hard unlock for iOS — must run inside a real user gesture, which is why
+    // resume() is wired to the gesture events below (capture phase, no `once`).
+    unlockOnce(c);
   }
   // Persistent prime listeners — capture phase, no `once`, so audio always
   // unlocks on the very gesture that's about to need it.
@@ -1900,6 +1936,11 @@ window.AdvocliqueAudio = (function(){
     if (fired) return;
     fired = true;
     blockingScroll = true;
+
+    // iOS: trigger the silent unlock RIGHT NOW (still inside the user gesture).
+    // The actual click sound fires 250ms later from a setTimeout — out of the
+    // gesture window — so without this call the context could remain locked.
+    if (window.AdvocliqueAudio) window.AdvocliqueAudio.resume();
 
     // Compute target: visual center of the H1 block
     const cRect = cursor.getBoundingClientRect();
