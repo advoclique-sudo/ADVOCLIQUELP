@@ -1791,6 +1791,7 @@ function submitForm(e){
   const form = e.target;
   const data = new FormData(form);
   const text = `Olá! Sou ${data.get('nome')} (${data.get('oab')}), advogo na área ${data.get('area')}.%0AE-mail: ${data.get('email')} · WhatsApp: ${data.get('phone')}.%0A%0A${data.get('mensagem') || 'Quero a análise gratuita.'}`;
+  gtag_report_conversion();
   window.open(`https://wa.me/5553991962382?text=${text}`,'_blank');
   return false;
 }
